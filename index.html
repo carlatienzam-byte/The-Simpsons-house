@@ -11,33 +11,39 @@
   <!-- ══ COMPONENTES — ANTES DE <a-scene> ══ -->
   <script>
     var JOY_R     = 37;
-    var SPEED     = 0.125;
+    var SPEED     = 0.2;
     var joyActive = false;
     var joyDx = 0, joyDy = 0;
 
+    var vertDir = 0; /* -1 bajar, 0 quieto, +1 subir */
+
     AFRAME.registerComponent('mobile-movement', {
       tick: function () {
-        if (!joyActive) return;
         var nx = joyDx / JOY_R;
         var ny = joyDy / JOY_R;
-        if (Math.abs(nx) < 0.05 && Math.abs(ny) < 0.05) return;
+        var moving = joyActive && (Math.abs(nx) > 0.05 || Math.abs(ny) > 0.05);
 
         var camEl = this.el.querySelector('[camera]');
         if (!camEl) return;
 
-        var euler = new THREE.Euler();
-        euler.setFromQuaternion(
-          camEl.object3D.getWorldQuaternion(new THREE.Quaternion()), 'YXZ'
-        );
-        var angle = euler.y;
-        var sinA  = Math.sin(angle);
-        var cosA  = Math.cos(angle);
+        if (moving) {
+          var euler = new THREE.Euler();
+          euler.setFromQuaternion(
+            camEl.object3D.getWorldQuaternion(new THREE.Quaternion()), 'YXZ'
+          );
+          var angle = euler.y;
+          var sinA  = Math.sin(angle);
+          var cosA  = Math.cos(angle);
+          var pos = this.el.object3D.position;
+          pos.x += sinA * (-ny) * SPEED;
+          pos.z += cosA * (-ny) * SPEED;
+          pos.x += cosA * nx * SPEED;
+          pos.z += (-sinA) * nx * SPEED;
+        }
 
-        var pos = this.el.object3D.position;
-        pos.x += sinA * (-ny) * SPEED;
-        pos.z += cosA * (-ny) * SPEED;
-        pos.x += cosA * nx * SPEED;
-        pos.z += (-sinA) * nx * SPEED;
+        if (vertDir !== 0) {
+          camEl.object3D.position.y += vertDir * SPEED;
+        }
       }
     });
   </script>
@@ -77,6 +83,22 @@
       text-align: center; line-height: 1.3;
       z-index: 9999; touch-action: manipulation; user-select: none;
     }
+    /* Botones subir/bajar */
+    #vert-btns {
+      position: fixed; bottom: 28px; right: 108px;
+      display: flex; flex-direction: column; gap: 8px;
+      z-index: 9999;
+    }
+    .vert-btn {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+      border: 2px solid rgba(255,255,255,0.5);
+      color: #fff; font-size: 22px;
+      display: flex; align-items: center; justify-content: center;
+      touch-action: manipulation; user-select: none; cursor: pointer;
+    }
+    .vert-btn:active { background: rgba(255,255,255,0.35); }
+
     #btn-portal:active { background: rgba(255,215,0,0.55); }
 
     #crosshair {
@@ -104,6 +126,12 @@
     <div class="joy-base" id="joy-base">
       <div class="joy-thumb" id="joy-thumb"></div>
     </div>
+  </div>
+
+  <!-- BOTONES SUBIR / BAJAR -->
+  <div id="vert-btns">
+    <div class="vert-btn" id="btn-up">&#9650;</div>
+    <div class="vert-btn" id="btn-down">&#9660;</div>
   </div>
 
   <!-- BOTÓN PORTAL -->
@@ -210,7 +238,7 @@
         material="color: #333" visible="false"></a-text>
     </a-box>
 
-    <a-box src="TheSimpsons" width="1" height="1" color="#FFF"
+    <a-box src="Maggie.jpg" width="1" height="1" color="#FFF"
       position="-15.80967 0.28263 -9.28789" depth="1" scale="0.5 0.5 0.5"
       rotation="0 90 0"
       event-set__enter="_event: mouseenter; _target: #maggiecaja; visible: true"
@@ -224,7 +252,6 @@
     <a-link id="miEnlace1"
       href="https://carlatienzam-byte.github.io/Movil-Prueba/"
       title="Backrooms"
-		image="backrooms.jpg"			
       position="12.28346 1.70881 3.71262"
       scale="0.5 0.5 0.5"
       geometry="primitive: circle; segments: 64"
@@ -249,6 +276,16 @@
   </a-scene>
 
   <script>
+    /* ── BOTONES SUBIR / BAJAR ── */
+    ['up','down'].forEach(function(dir) {
+      var btn = document.getElementById('btn-' + dir);
+      var val = dir === 'up' ? 1 : -1;
+      btn.addEventListener('touchstart', function(e) { e.preventDefault(); vertDir = val; }, { passive: false });
+      btn.addEventListener('touchend',   function(e) { e.preventDefault(); vertDir = 0;   }, { passive: false });
+      btn.addEventListener('mousedown',  function()  { vertDir = val; });
+      btn.addEventListener('mouseup',    function()  { vertDir = 0; });
+    });
+
     /* ── JOYSTICK ── */
     var joyBase  = document.getElementById('joy-base');
     var joyThumb = document.getElementById('joy-thumb');
