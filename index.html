@@ -1,0 +1,352 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>La casa de los simpsom :D</title>
+  <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+  <script src="https://unpkg.com/aframe-event-set-component@5.x.x/dist/aframe-event-set-component.min.js"></script>
+
+  <!-- ══ COMPONENTES — ANTES DE <a-scene> ══ -->
+  <script>
+    var JOY_R     = 37;
+    var SPEED     = 0.055;
+    var joyActive = false;
+    var joyDx = 0, joyDy = 0;
+
+    AFRAME.registerComponent('mobile-movement', {
+      tick: function () {
+        if (!joyActive) return;
+        var nx = joyDx / JOY_R;
+        var ny = joyDy / JOY_R;
+        if (Math.abs(nx) < 0.05 && Math.abs(ny) < 0.05) return;
+
+        var camEl = this.el.querySelector('[camera]');
+        if (!camEl) return;
+
+        var euler = new THREE.Euler();
+        euler.setFromQuaternion(
+          camEl.object3D.getWorldQuaternion(new THREE.Quaternion()), 'YXZ'
+        );
+        var angle = euler.y;
+        var sinA  = Math.sin(angle);
+        var cosA  = Math.cos(angle);
+
+        var pos = this.el.object3D.position;
+        pos.x += sinA * (-ny) * SPEED;
+        pos.z += cosA * (-ny) * SPEED;
+        pos.x += cosA * nx * SPEED;
+        pos.z += (-sinA) * nx * SPEED;
+      }
+    });
+  </script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { overflow: hidden; }
+
+    #joy-zone {
+      position: fixed; bottom: 28px; left: 20px;
+      width: 120px; height: 120px;
+      z-index: 9999; touch-action: none;
+    }
+    .joy-base {
+      width: 120px; height: 120px; border-radius: 50%;
+      background: rgba(255,255,255,0.13);
+      border: 2px solid rgba(255,255,255,0.4);
+      position: relative;
+    }
+    .joy-thumb {
+      width: 48px; height: 48px; border-radius: 50%;
+      background: rgba(255,255,255,0.55);
+      border: 2px solid rgba(255,255,255,0.9);
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      pointer-events: none;
+    }
+
+    #btn-portal {
+      position: fixed; bottom: 28px; right: 20px;
+      width: 76px; height: 76px; border-radius: 50%;
+      background: rgba(255,215,0,0.25);
+      border: 2px solid rgba(255,215,0,0.9);
+      color: #fff; font-family: sans-serif;
+      font-size: 11px; font-weight: bold;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center; line-height: 1.3;
+      z-index: 9999; touch-action: manipulation; user-select: none;
+    }
+    #btn-portal:active { background: rgba(255,215,0,0.55); }
+
+    #crosshair {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      pointer-events: none; z-index: 9998;
+    }
+
+    #toast {
+      position: fixed; bottom: 160px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.65); color: #fff;
+      font-family: sans-serif; font-size: 14px;
+      padding: 8px 18px; border-radius: 20px;
+      z-index: 9999; opacity: 0; transition: opacity 0.3s;
+      pointer-events: none; white-space: nowrap;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- JOYSTICK -->
+  <div id="joy-zone">
+    <div class="joy-base" id="joy-base">
+      <div class="joy-thumb" id="joy-thumb"></div>
+    </div>
+  </div>
+
+  <!-- BOTÓN PORTAL -->
+  <div id="btn-portal">ENTRAR<br>PORTAL</div>
+
+  <!-- CROSSHAIR -->
+  <div id="crosshair">
+    <svg width="34" height="34" viewBox="0 0 34 34">
+      <circle cx="17" cy="17" r="13" fill="none" stroke="white" stroke-width="1.5" opacity="0.75"/>
+      <line x1="17" y1="4"  x2="17" y2="11" stroke="white" stroke-width="1.5" opacity="0.75"/>
+      <line x1="17" y1="23" x2="17" y2="30" stroke="white" stroke-width="1.5" opacity="0.75"/>
+      <line x1="4"  y1="17" x2="11" y2="17" stroke="white" stroke-width="1.5" opacity="0.75"/>
+      <line x1="23" y1="17" x2="30" y2="17" stroke="white" stroke-width="1.5" opacity="0.75"/>
+      <circle cx="17" cy="17" r="2" fill="white" opacity="0.9"/>
+    </svg>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast"></div>
+
+  <!-- ══════════ ESCENA A-FRAME ══════════ -->
+  <a-scene color-management="true" vr-mode-ui="enabled: true">
+
+    <a-assets>
+      <a-asset-item id="casa"   src="simpsons_family_house__full_interior_opt.glb"></a-asset-item>
+      <a-asset-item id="marge1" src="marge_simpson_talk_animated_opt.glb"></a-asset-item>
+      <a-asset-item id="bart"   src="bart_simpson_dance_animated_opt.glb"></a-asset-item>
+      <a-asset-item id="lisa"   src="lisa_simpson_cool_animated_opt"></a-asset-item>
+      <a-asset-item id="maggie" src="maggie_simpson_opt.glb"></a-asset-item>
+      <a-asset-item id="homero" src="homer_simpson_fan_art_sculpt_opt.glb"></a-asset-item>
+    </a-assets>
+
+    <a-entity gltf-model="#casa" position="0 0 -10"></a-entity>
+
+    <a-entity gltf-model="bart_simpson_dance_animated_opt.glb"
+      position="-16.70939 0.00643 -0.00274"
+      animation-mixer=""
+      rotation="-0.3901842584840906 91.07106857824922 0">
+    </a-entity>
+
+    <a-entity gltf-model="marge_simpson_talk_animated_opt.glb"
+      position="-0.8497 0 -4.357"
+      animation-mixer=""
+      rotation="0 129.37100535156424 0">
+    </a-entity>
+
+    <a-entity gltf-model="lisa_simpson_cool_animated_opt.glb"
+      position="-7.06496 0.03879 -3.35162"
+      animation-mixer=""
+      sound="src: url(The Simpsons.mp3); on: click">
+    </a-entity>
+
+    <a-entity gltf-model="maggie_simpson_opt.glb"
+      position="-13.84433 0.01131 -7.74686"
+      animation-mixer=""
+      sound="src: url(Chupete.mp3); on: click">
+    </a-entity>
+
+    <a-entity gltf-model="homer_simpson_fan_art_sculpt_opt.glb"
+      position="-0.43427 1.39429 -6.75298"
+      animation-mixer=""
+      scale="0.49619 0.52194 1">
+    </a-entity>
+
+    <a-sky color="#ECECEC"></a-sky>
+
+    <!-- Cajas con info y mouseenter/mouseleave -->
+    <a-box src="marge1.png" width="1" height="1" color="#FFF"
+      position="-0.93913 0.5157 -3.2623" scale="0.5 0.5 0.5" depth="1"
+      rotation="0 90.46946289336185 0"
+      event-set__enter="_event: mouseenter; _target: #marge; visible: true"
+      event-set__leave="_event: mouseleave; _target: #marge; visible: false">
+      <a-text id="marge" value="Ella es Marge" align="center" color="#FFF"
+        position="0 0.2061 0.55" geometry="primitive: plane; width: 3"
+        material="color: #333"></a-text>
+    </a-box>
+
+    <a-box src="homero1.png" width="1" height="1" color="#FFF"
+      position="1.96382 0.5157 -6.7859" scale="0.5 0.5 0.5" depth="1"
+      rotation="0 -7.185463708735654 0"
+      event-set__enter="_event: mouseenter; _target: #homero1; visible: true"
+      event-set__leave="_event: mouseleave; _target: #homero1; visible: false">
+      <a-text id="homero1" value="El es Homero" align="center" color="#FFF"
+        position="0 0.2061 0.55" geometry="primitive: plane; width: 3"
+        material="color: #333"></a-text>
+    </a-box>
+
+    <a-box src="bart1.jpeg" width="1" height="1" color="#FFF"
+      position="-16.66877 0.5157 2.52329" scale="0.5 0.5 0.5" depth="1"
+      rotation="0 91.14841788059188 0"
+      event-set__enter="_event: mouseenter; _target: #bart1; visible: true"
+      event-set__leave="_event: mouseleave; _target: #bart1; visible: false">
+      <a-text id="bart1" value="El es Bart" align="center" color="#FFF"
+        position="0.00467 0.2061 0.58704" geometry="primitive: plane; width: 3"
+        material="color: #333"></a-text>
+    </a-box>
+
+    <a-box src="lisa.jpg" width="1" height="1" color="#FFF"
+      position="-5.48588 0.28263 -0.52481" depth="1" scale="0.5 0.5 0.5"
+      event-set__enter="_event: mouseenter; _target: #lisacaja; visible: true"
+      event-set__leave="_event: mouseleave; _target: #lisacaja; visible: false">
+      <a-text id="lisacaja" value="Haz click sobre Lisa" align="center" color="#FFF"
+        position="0.00467 0.2061 0.58704" geometry="primitive: plane; width: 3"
+        material="color: #333" visible="false"></a-text>
+    </a-box>
+
+    <a-box src="TheSimpsons" width="1" height="1" color="#FFF"
+      position="-15.80967 0.28263 -9.28789" depth="1" scale="0.5 0.5 0.5"
+      rotation="0 90 0"
+      event-set__enter="_event: mouseenter; _target: #maggiecaja; visible: true"
+      event-set__leave="_event: mouseleave; _target: #maggiecaja; visible: false">
+      <a-text id="maggiecaja" value="Haz click sobre Maggie" align="center" color="#FFF"
+        position="0.00467 0.2061 0.58704" geometry="primitive: plane; width: 3"
+        material="color: #333"></a-text>
+    </a-box>
+
+    <!-- PORTAL -->
+    <a-link id="miEnlace1"
+      href="https://carlatienzam-byte.github.io/Movil-Prueba/"
+      title="Backrooms"
+		image="backrooms.jpg"			
+      position="12.28346 1.70881 3.71262"
+      scale="0.5 0.5 0.5"
+      geometry="primitive: circle; segments: 64"
+      material="shader: portal; side: double; previewDistance: 7.5"
+      class="portal"
+      data-url="https://carlatienzam-byte.github.io/Movil-Prueba/">
+      <a-entity text="align: center; color: white; font: kelsonsans; value: Backrooms; width: 5"
+                position="0 1.5 0" rotation="0 180 0"></a-entity>
+    </a-link>
+
+    <!-- CÁMARA -->
+    <a-entity id="rig" position="0 0 0" mobile-movement>
+      <a-camera id="camera"
+        position="0 1.6 0"
+        camera="userHeight: 0"
+        look-controls="touchEnabled: true; magicWindowTrackingEnabled: false; pointerLockEnabled: false"
+        wasd-controls="enabled: false">
+        <a-cursor color="#fff" fuse="false"></a-cursor>
+      </a-camera>
+    </a-entity>
+
+  </a-scene>
+
+  <script>
+    /* ── JOYSTICK ── */
+    var joyBase  = document.getElementById('joy-base');
+    var joyThumb = document.getElementById('joy-thumb');
+
+    function joyPos(touch) {
+      var r = joyBase.getBoundingClientRect();
+      return {
+        x: touch.clientX - r.left - r.width  / 2,
+        y: touch.clientY - r.top  - r.height / 2
+      };
+    }
+
+    joyBase.addEventListener('touchstart', function(e) {
+      e.preventDefault(); joyActive = true;
+    }, { passive: false });
+
+    joyBase.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+      if (!joyActive) return;
+      var p = joyPos(e.touches[0]);
+      var d = Math.sqrt(p.x*p.x + p.y*p.y);
+      var c = d > JOY_R ? JOY_R / d : 1;
+      joyDx =  p.x * c;
+      joyDy = -p.y * c;
+      joyThumb.style.transform =
+        'translate(calc(-50% + '+joyDx+'px), calc(-50% + '+(-joyDy)+'px))';
+    }, { passive: false });
+
+    joyBase.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      joyActive = false; joyDx = 0; joyDy = 0;
+      joyThumb.style.transform = 'translate(-50%,-50%)';
+    }, { passive: false });
+
+    /* ── TOAST ── */
+    function showToast(msg) {
+      var t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(t._tid);
+      t._tid = setTimeout(function(){ t.classList.remove('show'); }, 2500);
+    }
+
+    /* ── PORTAL por raycaster central ── */
+    function getPortalAtCenter() {
+      var camEl = document.getElementById('camera');
+      if (!camEl) return null;
+      var cam = camEl.getObject3D('camera');
+      if (!cam) return null;
+      var rc = new THREE.Raycaster();
+      rc.setFromCamera(new THREE.Vector2(0,0), cam);
+      var meshes = [];
+      document.querySelectorAll('.portal').forEach(function(el) {
+        el.object3D.traverse(function(o){ if (o.isMesh) meshes.push(o); });
+      });
+      var hits = rc.intersectObjects(meshes, true);
+      if (!hits.length) return null;
+      var obj = hits[0].object;
+      for (var i = 0; i < 8; i++) {
+        if (obj.el && obj.el.dataset && obj.el.dataset.url) return obj.el;
+        if (!obj.parent) break;
+        obj = obj.parent;
+      }
+      return null;
+    }
+
+    function activatePortal(el) {
+      if (!el) { showToast('Apunta a un portal'); return; }
+      showToast('Entrando: ' + (el.getAttribute('title') || 'Portal'));
+      setTimeout(function(){ window.location.href = el.dataset.url; }, 600);
+    }
+
+    /* ── BOTÓN PORTAL ── */
+    var btnPortal = document.getElementById('btn-portal');
+    btnPortal.addEventListener('touchstart', function(e) {
+      e.preventDefault(); activatePortal(getPortalAtCenter());
+    }, { passive: false });
+    btnPortal.addEventListener('click', function() {
+      activatePortal(getPortalAtCenter());
+    });
+
+    /* ── CLICK EN PORTALES (desktop) ── */
+    var el1 = document.getElementById('miEnlace1');
+    if (el1) el1.addEventListener('click', function() {
+      window.location.href = el1.dataset.url;
+    });
+
+    /* ── DESBLOQUEO DE AUDIO EN MÓVIL ── */
+    var audioUnlocked = false;
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      var ctx = THREE.AudioContext ? THREE.AudioContext.getContext() : null;
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    }
+    document.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
+    document.addEventListener('click',      unlockAudio, { once: true });
+  </script>
+
+</body>
+</html>
