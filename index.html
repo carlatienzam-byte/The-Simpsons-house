@@ -153,7 +153,8 @@
   <div id="toast"></div>
 
   <!-- ══════════ ESCENA A-FRAME ══════════ -->
-  <a-scene color-management="true" vr-mode-ui="enabled: true">
+  <a-scene color-management="true" vr-mode-ui="enabled: true"
+    gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/versioned/decoders/1.5.7/">
 
     <a-assets>
       <a-asset-item id="casa"   src="simpsons_family_house__full_interior_opt.glb"></a-asset-item>
@@ -368,10 +369,16 @@
       activatePortal(getPortalAtCenter());
     });
 
-    /* ── CLICK EN PORTALES (desktop) ── */
-    var el1 = document.getElementById('miEnlace1');
-    if (el1) el1.addEventListener('click', function() {
-      window.location.href = el1.dataset.url;
+    /* ── CLICK EN PORTALES: BLOQUEADO A PROPÓSITO ──
+       Solo se puede entrar a un portal pulsando el botón "ENTRAR PORTAL".
+       Interceptamos el clic en fase de captura (antes de que el componente
+       'link' interno de A-Frame procese su navegación automática) y lo
+       detenemos por completo. */
+    document.querySelectorAll('.portal').forEach(function(el) {
+      el.addEventListener('click', function(e) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      }, true);
     });
 
     /* ── DESBLOQUEO DE AUDIO EN MÓVIL ── */
