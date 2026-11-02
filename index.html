@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>La casa de los simpsom :D</title>
   <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
+  <!-- Colisiones con los modelos GLB (archivos locales del repo) -->
+  <script src="three-mesh-bvh.min.js"></script>
+  <script src="colisiones.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
   <script src="https://unpkg.com/aframe-event-set-component@5.x.x/dist/aframe-event-set-component.min.js"></script>
 
@@ -265,7 +268,7 @@
     </a-link>
 
     <!-- CÁMARA -->
-    <a-entity id="rig" position="0 0 0" mobile-movement>
+    <a-entity id="rig" colision-malla position="0 0 0" mobile-movement>
       <a-camera id="camera"
         position="0 1.6 0"
         camera="userHeight: 0"
