@@ -18,6 +18,10 @@
    · Para que un modelo NO choque (hierba, flores, cielo...), añade el
      atributo  sin-colision  a su entidad.
    · Los cielos enormes y los personajes animados se ignoran solos.
+   · SUELO: al bajar (botón ▼ o agachándose con las gafas) el visitante
+     se detiene a "sobreSuelo" metros de cualquier superficie horizontal:
+     suelos de los GLB y planos de A-Frame (a-plane, a-box o a-cylinder
+     planos). Esos planos solo frenan en vertical, nunca hacen de pared.
    ════════════════════════════════════════════════════════════════════ */
 (function () {
   if (!window.AFRAME || !window.THREE) return;
@@ -29,7 +33,8 @@
       alturas: {default: '1.0 0.4'},  // alturas de comprobación, en metros por DEBAJO de los ojos
       salto:   {default: 3},          // movimientos mayores (teletransportes) no se comprueban
       pendiente: {default: 0.7},      // superficies más tumbadas que ~45° (suelo, terreno) no bloquean
-      maximo:  {default: 150}         // mallas más grandes que esto (cielos) se ignoran
+      maximo:  {default: 150},        // mallas más grandes: solo cuentan como suelo
+      sobreSuelo: {default: 0.4}      // altura mínima de los ojos sobre el suelo (m)
     },
 
     init: function () {
@@ -53,6 +58,10 @@
       this.el.sceneEl.addEventListener('model-loaded', this.alCargar);
       // modelos que ya hubieran cargado antes que este componente
       this.el.sceneEl.querySelectorAll('[gltf-model]').forEach(function (el) { self.registrar(el); });
+      // planos de suelo hechos con primitivas de A-Frame
+      this.buscarSuelos = function () { self.registrarPrimitivas(); };
+      if (this.el.sceneEl.hasLoaded) setTimeout(this.buscarSuelos, 0);
+      else this.el.sceneEl.addEventListener('loaded', this.buscarSuelos);
     },
 
     remove: function () {
@@ -79,6 +88,25 @@
       });
     },
 
+    /* Primitivas planas y grandes (a-plane, a-box, a-cylinder…) → solo suelo */
+    registrarPrimitivas: function () {
+      var self = this, caja = new THREE.Box3(), tam = new THREE.Vector3();
+      this.el.sceneEl.querySelectorAll('[geometry]').forEach(function (el) {
+        if (self.excluido(el)) return;
+        var m = el.getObject3D('mesh');
+        if (!m || !m.isMesh || self.vistos.has(m) || !m.geometry || !m.geometry.attributes.position) return;
+        var g = m.geometry;
+        if (!g.boundingBox) g.computeBoundingBox();
+        m.updateWorldMatrix(true, false);
+        caja.copy(g.boundingBox).applyMatrix4(m.matrixWorld).getSize(tam);
+        var ancho = Math.max(tam.x, tam.z);
+        if (ancho < 2 || tam.y > ancho * 0.3) return;      // no es un suelo
+        self.vistos.add(m);
+        m.userData.soloSuelo = true;
+        self.cola.push(m);
+      });
+    },
+
     /* Prepara (BVH) unas pocas mallas por fotograma */
     preparar: function () {
       var inicio = performance.now();
@@ -89,13 +117,14 @@
           if (!g.boundingSphere) g.computeBoundingSphere();
           m.updateWorldMatrix(true, false);
           var escala = m.matrixWorld.getMaxScaleOnAxis();
-          if (g.boundingSphere.radius * escala > this.data.maximo) continue;   // cielo, montañas lejanas…
           if (g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length) continue;
+          // cielos, montañas lejanas y planos: solo cuentan como suelo
+          var soloSuelo = !!m.userData.soloSuelo || g.boundingSphere.radius * escala > this.data.maximo;
           if (!g.boundsTree) g.boundsTree = new BVH(g, {maxLeafTris: 12});
           if (m.isInstancedMesh) {
-            for (var i = 0; i < m.count; i++) this.mallas.push({mesh: m, inst: i});
+            for (var i = 0; i < m.count; i++) this.mallas.push({mesh: m, inst: i, soloSuelo: soloSuelo});
           } else {
-            this.mallas.push({mesh: m, inst: -1});
+            this.mallas.push({mesh: m, inst: -1, soloSuelo: soloSuelo});
           }
         } catch (err) { /* geometría rara: se ignora */ }
       }
@@ -106,12 +135,15 @@
       return true;
     },
 
-    /* Rayo horizontal: devuelve {dist, normal} del primer choque o null */
-    lanzar: function (origen, dir, lejos) {
+    /* Rayo: devuelve {dist, normal, item} del primer choque o null.
+       suelo=false → solo paredes (superficies empinadas)
+       suelo=true  → solo suelos (superficies tumbadas), incluidos los planos */
+    lanzar: function (origen, dir, lejos, suelo) {
       var mejor = null, mejorD = lejos;
       for (var k = 0; k < this.mallas.length; k++) {
         var it = this.mallas[k], m = it.mesh, g = m.geometry;
         if (it.ignorar) continue;
+        if (it.soloSuelo && !suelo) continue;
         var M = m.matrixWorld;
         if (it.inst >= 0) { m.getMatrixAt(it.inst, this._im); M = this._mat.multiplyMatrices(m.matrixWorld, this._im); }
         // filtro rápido con la esfera envolvente
@@ -138,7 +170,7 @@
           var nrm = hits[h].face.normal.clone().applyMatrix3(this._nm).normalize();
           // Solo bloquean las superficies empinadas (paredes, muebles, troncos…).
           // Suelos, rampas y ondulaciones del terreno no frenan nunca.
-          if (Math.abs(nrm.y) > this.data.pendiente) continue;
+          if (suelo ? Math.abs(nrm.y) <= this.data.pendiente : Math.abs(nrm.y) > this.data.pendiente) continue;
           mejorD = dist;
           mejor = {dist: dist, normal: nrm, item: it};
         }
@@ -204,6 +236,20 @@
       if (!camEl) return;
       camEl.object3D.getWorldPosition(this.cam);
       if (!this.prev) { this.prev = this.cam.clone(); return; }
+
+      // ── SUELO: si se ha bajado, comprobar que no se atraviesa ninguna superficie
+      var dy = this.cam.y - this.prev.y;
+      if (dy < -1e-5 && dy > -this.data.salto && this.mallas.length) {
+        this._o.set(this.cam.x, this.prev.y, this.cam.z);
+        var abajo = this.lanzar(this._o, new THREE.Vector3(0, -1, 0), -dy + this.data.sobreSuelo, true);
+        if (abajo) {
+          var minimo = Math.min(this.prev.y, this.prev.y - abajo.dist + this.data.sobreSuelo);
+          if (this.cam.y < minimo) {
+            camEl.object3D.position.y += minimo - this.cam.y;   // la cámara es la que sube/baja
+            this.cam.y = minimo;
+          }
+        }
+      }
 
       var dx = this.cam.x - this.prev.x, dz = this.cam.z - this.prev.z;
       var mov = Math.sqrt(dx * dx + dz * dz);
