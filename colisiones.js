@@ -50,6 +50,7 @@
       this._inv = new THREE.Matrix4(); this._mat = new THREE.Matrix4(); this._im = new THREE.Matrix4();
       this._sph = new THREE.Sphere(); this._v = new THREE.Vector3(); this._n = new THREE.Vector3();
       this._nm = new THREE.Matrix3(); this._o = new THREE.Vector3(); this._d = new THREE.Vector3();
+      this._caja = new THREE.Box3(); this._tam = new THREE.Vector3();
 
       if (!BVH) { console.warn('[colisiones] Falta three-mesh-bvh: colisiones desactivadas'); return; }
 
@@ -115,11 +116,15 @@
         var m = this.cola.shift(), g = m.geometry;
         try {
           if (!g.boundingSphere) g.computeBoundingSphere();
+          if (!g.boundingBox) g.computeBoundingBox();
           m.updateWorldMatrix(true, false);
-          var escala = m.matrixWorld.getMaxScaleOnAxis();
+          // Tamaño REAL en el mundo, a partir de la caja. (Con los modelos de
+          // gltfpack la escala no es igual en los tres ejes y la esfera
+          // envolvente exageraba el tamaño: una tienda de 15 m salía de 199 m.)
+          var radioMundo = this._caja.copy(g.boundingBox).applyMatrix4(m.matrixWorld).getSize(this._tam).length() / 2;
           if (g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length) continue;
           // cielos, montañas lejanas y planos: solo cuentan como suelo
-          var soloSuelo = !!m.userData.soloSuelo || g.boundingSphere.radius * escala > this.data.maximo;
+          var soloSuelo = !!m.userData.soloSuelo || radioMundo > this.data.maximo;
           if (!g.boundsTree) g.boundsTree = new BVH(g, {maxLeafTris: 12});
           if (m.isInstancedMesh) {
             for (var i = 0; i < m.count; i++) this.mallas.push({mesh: m, inst: i, soloSuelo: soloSuelo});
