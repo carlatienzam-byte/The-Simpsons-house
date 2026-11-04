@@ -17,7 +17,11 @@
      ondulaciones del terreno nunca atrapan al visitante.
    · Para que un modelo NO choque (hierba, flores, cielo...), añade el
      atributo  sin-colision  a su entidad.
-   · Los cielos enormes y los personajes animados se ignoran solos.
+   · Los cielos enormes y los personajes ANIMADOS se ignoran solos. Los
+     modelos con esqueleto que no se mueven (p. ej. la puerta torii) sí
+     chocan: su forma se "congela" al cargar.
+   · TECHO (opcional, colision-malla="techo: true"): al subir con ▲ el
+     visitante se detiene bajo cualquier superficie: techos, bóvedas, arcos.
    · SUELO: al bajar (botón ▼ o agachándose con las gafas) el visitante
      se detiene a "sobreSuelo" metros de cualquier superficie horizontal:
      suelos de los GLB y planos de A-Frame (a-plane, a-box o a-cylinder
@@ -30,11 +34,15 @@
   AFRAME.registerComponent('colision-malla', {
     schema: {
       radio:   {default: 0.3},        // distancia mínima a la pared (m)
-      alturas: {default: '1.0 0.4'},  // alturas de comprobación, en metros por DEBAJO de los ojos
+      // alturas de comprobación, en metros por DEBAJO de los ojos: cada 25 cm, de la cabeza
+      // a casi el suelo, para que ni un panel estrecho (vallas) se cuele entre dos rayos
+      alturas: {default: '0.05 0.3 0.55 0.8 1.05 1.3'},
       salto:   {default: 3},          // movimientos mayores (teletransportes) no se comprueban
       pendiente: {default: 0.7},      // superficies más tumbadas que ~45° (suelo, terreno) no bloquean
       maximo:  {default: 150},        // mallas más grandes: solo cuentan como suelo
-      sobreSuelo: {default: 0.4}      // altura mínima de los ojos sobre el suelo (m)
+      sobreSuelo: {default: 0.4},     // altura mínima de los ojos sobre el suelo (m)
+      techo:   {default: false},      // true: al subir (▲) tampoco se atraviesan techos, bóvedas ni arcos
+      bajoTecho: {default: 0.25}      // distancia mínima de los ojos al techo (m)
     },
 
     init: function () {
@@ -78,14 +86,37 @@
       return false;
     },
 
+    /* ¿El modelo (o algún antepasado) tiene animación? */
+    animado: function (el) {
+      for (var e = el; e && e !== this.el.sceneEl; e = e.parentEl) {
+        if (e.hasAttribute && e.hasAttribute('animation-mixer')) return true;
+      }
+      return false;
+    },
+
+    /* Forma "congelada" de un modelo con esqueleto: posiciones ya deformadas por los huesos */
+    congelar: function (m) {
+      if (m.skeleton) m.skeleton.update();
+      var src = m.geometry, n = src.attributes.position.count, v = new THREE.Vector3();
+      var pos = new Float32Array(n * 3);
+      for (var i = 0; i < n; i++) { m.getVertexPosition(i, v); pos[3 * i] = v.x; pos[3 * i + 1] = v.y; pos[3 * i + 2] = v.z; }
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      if (src.index) g.setIndex(src.index.clone());
+      g.computeBoundingSphere(); g.computeBoundingBox();
+      return g;
+    },
+
     registrar: function (el) {
       if (!el || !el.getObject3D) return;
       var raiz = el.getObject3D('mesh');
       if (!raiz || this.vistos.has(raiz) || this.excluido(el)) return;
       this.vistos.add(raiz);
-      var self = this;
+      var self = this, animado = this.animado(el);
       raiz.traverse(function (o) {
-        if (o.isMesh && !o.isSkinnedMesh && o.geometry && o.geometry.attributes.position) self.cola.push(o);
+        if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+        if (o.isSkinnedMesh && animado) return;      // personaje animado: su forma cambia, no se usa
+        self.cola.push(o);
       });
     },
 
@@ -115,6 +146,7 @@
       while (this.cola.length && performance.now() - inicio < 8) {
         var m = this.cola.shift(), g = m.geometry;
         try {
+          if (m.isSkinnedMesh) { m.updateWorldMatrix(true, false); g = this.congelar(m); }
           if (!g.boundingSphere) g.computeBoundingSphere();
           if (!g.boundingBox) g.computeBoundingBox();
           m.updateWorldMatrix(true, false);
@@ -126,13 +158,19 @@
           // cielos, montañas lejanas y planos: solo cuentan como suelo
           var soloSuelo = !!m.userData.soloSuelo || radioMundo > this.data.maximo;
           if (!g.boundsTree) g.boundsTree = new BVH(g, {maxLeafTris: 12});
+          var geo = (g !== m.geometry) ? g : null;     // geometría congelada (modelos con esqueleto)
           if (m.isInstancedMesh) {
-            for (var i = 0; i < m.count; i++) this.mallas.push({mesh: m, inst: i, soloSuelo: soloSuelo});
+            for (var i = 0; i < m.count; i++) this.mallas.push({mesh: m, inst: i, soloSuelo: soloSuelo, geo: geo});
           } else {
-            this.mallas.push({mesh: m, inst: -1, soloSuelo: soloSuelo});
+            this.mallas.push({mesh: m, inst: -1, soloSuelo: soloSuelo, geo: geo});
           }
         } catch (err) { /* geometría rara: se ignora */ }
       }
+    },
+
+    camara: function () {
+      if (this.el.components && this.el.components.camera) return this.el;
+      return this.el.querySelector('[camera]');
     },
 
     visible: function (o) {
@@ -142,13 +180,15 @@
 
     /* Rayo: devuelve {dist, normal, item} del primer choque o null.
        suelo=false → solo paredes (superficies empinadas)
-       suelo=true  → solo suelos (superficies tumbadas), incluidos los planos */
+       suelo=true  → solo suelos (superficies tumbadas), incluidos los planos
+       suelo='todo'→ cualquier superficie (para los techos) */
     lanzar: function (origen, dir, lejos, suelo) {
+      if (suelo === undefined) suelo = false;
       var mejor = null, mejorD = lejos;
       for (var k = 0; k < this.mallas.length; k++) {
-        var it = this.mallas[k], m = it.mesh, g = m.geometry;
+        var it = this.mallas[k], m = it.mesh, g = it.geo || m.geometry;
         if (it.ignorar) continue;
-        if (it.soloSuelo && !suelo) continue;
+        if (it.soloSuelo && suelo === false) continue;
         var M = m.matrixWorld;
         if (it.inst >= 0) { m.getMatrixAt(it.inst, this._im); M = this._mat.multiplyMatrices(m.matrixWorld, this._im); }
         // filtro rápido con la esfera envolvente
@@ -175,7 +215,8 @@
           var nrm = hits[h].face.normal.clone().applyMatrix3(this._nm).normalize();
           // Solo bloquean las superficies empinadas (paredes, muebles, troncos…).
           // Suelos, rampas y ondulaciones del terreno no frenan nunca.
-          if (suelo ? Math.abs(nrm.y) <= this.data.pendiente : Math.abs(nrm.y) > this.data.pendiente) continue;
+          if (suelo === true && Math.abs(nrm.y) <= this.data.pendiente) continue;
+          if (suelo === false && Math.abs(nrm.y) > this.data.pendiente) continue;
           mejorD = dist;
           mejor = {dist: dist, normal: nrm, item: it};
         }
@@ -227,7 +268,7 @@
       this.preparar();
       if (this.revisar && !this.cola.length) {
         this.revisar = false;
-        var c = new THREE.Vector3(), camEl = this.el.querySelector('[camera]') || this.el;
+        var c = new THREE.Vector3(), camEl = this.camara() || this.el;
         camEl.object3D.getWorldPosition(c);
         this.liberar(c);
       }
@@ -237,7 +278,7 @@
 
     resolver: function () {
       if (!BVH) return;
-      var camEl = this.el.querySelector('[camera]') || (this.el.hasAttribute('camera') ? this.el : null);
+      var camEl = this.camara();
       if (!camEl) return;
       camEl.object3D.getWorldPosition(this.cam);
       if (!this.prev) { this.prev = this.cam.clone(); return; }
@@ -252,6 +293,19 @@
           if (this.cam.y < minimo) {
             camEl.object3D.position.y += minimo - this.cam.y;   // la cámara es la que sube/baja
             this.cam.y = minimo;
+          }
+        }
+      }
+
+      // ── TECHO: si se ha subido, comprobar que no se atraviesa nada por arriba
+      if (this.data.techo && dy > 1e-5 && dy < this.data.salto && this.mallas.length) {
+        this._o.set(this.cam.x, this.prev.y, this.cam.z);
+        var arriba = this.lanzar(this._o, new THREE.Vector3(0, 1, 0), dy + this.data.bajoTecho, 'todo');
+        if (arriba) {
+          var maximo = Math.max(this.prev.y, this.prev.y + arriba.dist - this.data.bajoTecho);
+          if (this.cam.y > maximo) {
+            camEl.object3D.position.y -= this.cam.y - maximo;
+            this.cam.y = maximo;
           }
         }
       }
