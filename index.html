@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>La casa de los simpsom :D</title>
   <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
+  <!-- Cámara y joystick con varios dedos a la vez -->
+  <script src="multitactil.js"></script>
   <!-- Colisiones con los modelos GLB (archivos locales del repo) -->
   <script src="three-mesh-bvh.min.js"></script>
   <script src="colisiones.js"></script>
@@ -310,7 +312,7 @@
     joyBase.addEventListener('touchmove', function(e) {
       e.preventDefault();
       if (!joyActive) return;
-      var p = joyPos(e.touches[0]);
+      var p = joyPos(e.targetTouches[0] || e.touches[0]);
       var d = Math.sqrt(p.x*p.x + p.y*p.y);
       var c = d > JOY_R ? JOY_R / d : 1;
       joyDx =  p.x * c;
