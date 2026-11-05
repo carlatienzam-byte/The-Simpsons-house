@@ -130,13 +130,29 @@
         var g = m.geometry;
         if (!g.boundingBox) g.computeBoundingBox();
         m.updateWorldMatrix(true, false);
-        caja.copy(g.boundingBox).applyMatrix4(m.matrixWorld).getSize(tam);
-        var ancho = Math.max(tam.x, tam.z);
-        if (ancho < 2 || tam.y > ancho * 0.3) return;      // no es un suelo
+        if (el.components && el.components.text) return;          // los textos nunca son suelo
+        if (!self.esSuelo(m, g)) return;
         self.vistos.add(m);
         m.userData.soloSuelo = true;
         self.cola.push(m);
       });
+    },
+
+    /* ¿Es una superficie HORIZONTAL de verdad? Se mira la pieza en sus propios ejes:
+       su lado más fino debe apuntar hacia arriba/abajo, y los otros dos medir ≥ 1 m.
+       (Así un marco o un cartel girado 45° no se confunde con un suelo.) */
+    esSuelo: function (m, g) {
+      var e = m.matrixWorld.elements, b = g.boundingBox;
+      var tam = [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z];
+      var ejes = [new THREE.Vector3(e[0], e[1], e[2]), new THREE.Vector3(e[4], e[5], e[6]), new THREE.Vector3(e[8], e[9], e[10])];
+      var largo = ejes.map(function (v, i) { return v.length() * tam[i]; });
+      var fino = largo.indexOf(Math.min.apply(null, largo));
+      var a = ejes[(fino + 1) % 3], c = ejes[(fino + 2) % 3];
+      if (largo[(fino + 1) % 3] < 1 || largo[(fino + 2) % 3] < 1) return false;     // estrecho
+      if (largo[fino] > 0.3 * Math.min(largo[(fino + 1) % 3], largo[(fino + 2) % 3])) return false;  // grueso
+      var normal = new THREE.Vector3().crossVectors(a, c);       // perpendicular a la cara ancha
+      if (normal.lengthSq() < 1e-12) return false;
+      return Math.abs(normal.normalize().y) > 0.9;                // apunta hacia arriba/abajo
     },
 
     /* Prepara (BVH) unas pocas mallas por fotograma */
@@ -157,7 +173,7 @@
           if (g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length) continue;
           // cielos, montañas lejanas y planos: solo cuentan como suelo
           var soloSuelo = !!m.userData.soloSuelo || radioMundo > this.data.maximo;
-          if (!g.boundsTree) g.boundsTree = new BVH(g, {maxLeafTris: 12});
+          if (!g.boundsTree) g.boundsTree = new BVH(g, {targetLeafSize: 12});
           var geo = (g !== m.geometry) ? g : null;     // geometría congelada (modelos con esqueleto)
           if (m.isInstancedMesh) {
             for (var i = 0; i < m.count; i++) this.mallas.push({mesh: m, inst: i, soloSuelo: soloSuelo, geo: geo});
@@ -187,7 +203,15 @@
       var mejor = null, mejorD = lejos;
       for (var k = 0; k < this.mallas.length; k++) {
         var it = this.mallas[k], m = it.mesh, g = it.geo || m.geometry;
-        if (it.ignorar) continue;
+        if (it.ignorar || !g || !g.attributes || !g.attributes.position) continue;
+        if (!g.boundsTree) {
+          // A-Frame ha sustituido la geometría (p. ej. al cargar la tipografía): se prepara de nuevo
+          try {
+            if (!g.boundingSphere) g.computeBoundingSphere();
+            g.boundsTree = new BVH(g, {targetLeafSize: 12});
+          } catch (e) { it.ignorar = true; continue; }
+        }
+        if (!g.boundingSphere) g.computeBoundingSphere();
         if (it.soloSuelo && suelo === false) continue;
         var M = m.matrixWorld;
         if (it.inst >= 0) { m.getMatrixAt(it.inst, this._im); M = this._mat.multiplyMatrices(m.matrixWorld, this._im); }
@@ -265,6 +289,18 @@
     },
 
     tick: function () {
+      try { this.tickSeguro(); } catch (e) { this.fallo(e); }
+    },
+    tock: function () {
+      try { this.resolver(); } catch (e) { this.fallo(e); }
+    },
+    /* Si algo falla, se avisa una vez en la consola y se sigue: un error aquí
+       nunca debe detener el dibujado de la escena (A-Frame se congelaría). */
+    fallo: function (e) {
+      if (!this.yaAvisado) { this.yaAvisado = true; console.warn('[colisiones] error ignorado:', e); }
+    },
+
+    tickSeguro: function () {
       this.preparar();
       if (this.revisar && !this.cola.length) {
         this.revisar = false;
@@ -274,8 +310,6 @@
       }
       this.resolver();
     },
-    tock: function () { this.resolver(); },
-
     resolver: function () {
       if (!BVH) return;
       var camEl = this.camara();
